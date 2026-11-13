@@ -43,6 +43,10 @@
           <button class="icon-btn mobile-menu" id="mobileMenu" aria-label="Открыть меню">☰</button>
           <span class="mobile-brand">BLACK GPT</span>
           <div class="model-wrap"><span class="online-indicator"></span><button class="model-button" id="modelInfo">Black GPT <span class="model-tag">AI</span></button></div>
+          <nav class="view-switch" aria-label="Режим работы">
+            <button class="view-switch-btn active" id="showChatView" type="button">✧ <span>Чат</span></button>
+            <button class="view-switch-btn" id="showCodeView" type="button">⌘ <span>Code</span></button>
+          </nav>
         </div>
         <div class="topbar-right">
           <span class="secure-label"><span>✦</span> ТВОЙ ИИ-ПРОСТРАНСТВО</span>
@@ -51,6 +55,7 @@
         </div>
       </header>
 
+      <div class="chat-view" id="chatView">
       <section class="conversation" id="conversation">
         <div class="welcome" id="welcome">
           <div class="welcome-orbit"><div class="welcome-mark">B</div><i></i><b></b></div>
@@ -84,6 +89,68 @@
         </div>
         <p class="disclaimer">Black GPT может ошибаться — проверяй важную информацию.</p>
       </div>
+      </div>
+
+      <section class="code-view" id="codeView" hidden>
+        <div class="code-heading">
+          <div>
+            <div class="code-eyebrow"><span class="code-eyebrow-dot"></span> BLACK GPT / DEVELOPER WORKSPACE</div>
+            <h1>Создавай без границ<span>.</span></h1>
+            <p>Подключи папку на компьютере и работай над кодом вместе с Black GPT.</p>
+          </div>
+          <div class="code-heading-status"><span class="agent-status-dot" id="agentStatusDot"></span><span id="agentStatusText">Компьютер не подключён</span></div>
+        </div>
+
+        <div class="agent-connect-card">
+          <div class="agent-connect-icon">⌘</div>
+          <div class="agent-connect-copy">
+            <strong>Подключение к компьютеру</strong>
+            <span id="agentHelp">Запусти <b>start-black-gpt-agent.bat</b> на ПК, затем введи код подключения из открывшегося окна.</span>
+          </div>
+          <input id="agentToken" class="agent-token-input" type="password" autocomplete="off" placeholder="Код подключения" aria-label="Код локального помощника">
+          <button id="connectAgent" class="code-primary-btn" type="button">Подключить</button>
+          <button id="chooseWorkspace" class="code-secondary-btn" type="button" disabled>Выбрать папку</button>
+        </div>
+
+        <div class="code-layout">
+          <aside class="code-pane explorer-pane">
+            <div class="code-pane-title"><span>ПРОЕКТ</span><div class="code-pane-actions"><button id="refreshTree" title="Обновить файлы" type="button">↻</button><button id="newCodeFile" title="Новый файл" type="button">＋</button></div></div>
+            <div class="workspace-path" id="workspacePath">Папка не выбрана</div>
+            <div class="file-tree" id="fileTree"><div class="code-empty-state"><span>▤</span><strong>Здесь появятся файлы проекта</strong><small>Подключи компьютер, чтобы открыть папку.</small></div></div>
+            <div class="explorer-foot"><span class="file-count" id="fileCount">0 файлов</span><span>Локальные файлы</span></div>
+          </aside>
+
+          <section class="code-pane editor-pane">
+            <div class="editor-topbar">
+              <div class="editor-file-label"><span class="editor-file-icon">◇</span><strong id="activeFileName">Редактор</strong><span id="dirtyMark" class="dirty-mark" hidden>●</span></div>
+              <div class="editor-actions"><button id="discardFileChanges" class="code-quiet-btn" type="button" disabled>Отменить</button><button id="saveCodeFile" class="code-save-btn" type="button" disabled>Сохранить файл</button></div>
+            </div>
+            <div class="editor-subbar"><span id="editorFilePath">Выбери файл в проводнике</span><span id="editorLanguage">TEXT</span></div>
+            <textarea id="codeEditor" class="code-editor" spellcheck="false" autocapitalize="off" autocomplete="off" disabled placeholder="После подключения выбери файл слева — его код появится здесь."></textarea>
+            <div class="editor-statusbar"><span id="editorStatus">Редактор ожидает подключения</span><span>UTF-8 · LF</span></div>
+          </section>
+
+          <aside class="code-pane code-ai-pane">
+            <div class="code-ai-header"><div class="code-ai-avatar">B</div><div><strong>Black GPT Code</strong><small>AI-разработчик проекта</small></div><span class="code-ai-online">AI</span></div>
+            <div class="code-ai-body">
+              <div class="code-ai-intro"><span class="code-ai-spark">✦</span><strong>Что будем создавать?</strong><p>Опиши задачу. Я изучу выбранные файлы и подготовлю изменения. Ничего не запишется на диск без твоего подтверждения.</p></div>
+              <div class="context-box"><div class="context-heading"><span>КОНТЕКСТ ДЛЯ ИИ</span><span id="contextCount">0 файлов</span></div><div id="contextFiles" class="context-files"><span class="context-empty">Открой файл слева, чтобы добавить его в контекст.</span></div></div>
+              <label class="code-task-label" for="codeTask">ТВОЯ ЗАДАЧА</label>
+              <textarea id="codeTask" class="code-task" rows="5" placeholder="Например: сделай адаптивное меню, исправь ошибку авторизации или добавь новую функцию..."></textarea>
+              <button id="askCodeAI" class="code-generate-btn" type="button" disabled><span>✦</span> Подготовить изменения <span>↗</span></button>
+              <div class="code-ai-hint">Изменения сначала появятся в предпросмотре. Ты сам решаешь, применять их или нет.</div>
+              <div class="code-proposal" id="codeProposal" hidden>
+                <div class="proposal-heading"><span class="proposal-check">✓</span><strong>Предложение готово</strong></div>
+                <p id="proposalSummary"></p>
+                <div class="proposal-files" id="proposalFiles"></div>
+                <div class="proposal-preview-wrap"><div class="proposal-preview-head"><span>ПРЕДПРОСМОТР</span><span id="proposalPreviewName"></span></div><pre id="proposalPreview"></pre></div>
+                <div class="proposal-actions"><button id="rejectProposal" class="code-secondary-btn" type="button">Отменить</button><button id="applyProposal" class="code-primary-btn" type="button">Применить изменения</button></div>
+              </div>
+            </div>
+          </aside>
+        </div>
+        <div class="code-safety-note"><span>◈</span> Black GPT работает только внутри выбранной папки. Секретные файлы (.env, ключи, пароли) скрыты. Перед записью создаётся резервная копия.</div>
+      </section>
     </main>
   </div>
 

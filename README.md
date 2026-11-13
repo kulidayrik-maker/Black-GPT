@@ -1,40 +1,60 @@
-# Black GPT
+# BLACK GPT — чат и Code Workspace
 
-Black GPT is an independent AI chat application with its own visual identity and an editable system prompt. It is not affiliated with OpenAI and does not copy ChatGPT branding.
+Black GPT — отдельное ИИ-приложение с настраиваемым системным промтом и рабочей вкладкой Code. Для ответов используется выбранная OpenAI-совместимая модель через Cloudflare Pages Functions.
 
-## Included
+## Что есть в проекте
 
-- Responsive Black GPT interface with dark/light themes
-- Chat history, search, rename, delete, export and sharing
-- Streaming assistant replies
-- Custom system prompt that is sent with every API request and saved separately from chat history
-- Temperature control
-- Image and text-file attachments (image support depends on the selected model)
-- Voice dictation in browsers that support Web Speech API
-- Cloudflare Pages Function proxy; the API key is never placed in browser code
+- Чат Black GPT с историей, поиском, экспортом, загрузкой изображений/текстовых файлов и голосовым вводом.
+- Отдельное сохранение системного промта: он передаётся модели при каждом запросе.
+- Вкладка **Code**: проводник файлов, редактор, выбор файлов в контекст, ИИ-предложения правок, предпросмотр и ручное подтверждение применения.
+- Локальный помощник `blackgpt_agent.py`, который открывает только выбранную пользователем папку компьютера.
+- Cloudflare Pages Functions: `/api/chat` и `/api/code`.
 
-## Cloudflare Pages deployment
+## Публикация на Cloudflare Pages
 
-1. Keep `index.html`, `app.js`, `styles.css`, `wrangler.toml`, and the `functions` directory at the project root.
-2. In Cloudflare Pages → Settings → Variables and Secrets, add these for Production (and Preview if needed):
-   - `AI_API_KEY` — provider API key, stored as a secret.
-   - `AI_BASE_URL` — for Groq: `https://api.groq.com/openai/v1`.
-   - `AI_MODEL` — for example `openai/gpt-oss-120b`, or another model available to your provider.
-3. Redeploy the Pages project after changing variables.
+В репозитории должны находиться `index.html`, `app.js`, `styles.css`, `wrangler.toml`, папка `functions`, `blackgpt_agent.py` и `start-black-gpt-agent.bat`.
 
-Do not put the API key in `app.js`, `index.html`, GitHub, or a browser-side `.env` file.
+Настройки Pages:
 
-## Local preview
+- **Build Command:** `exit 0`
+- **Build output directory:** `.`
+- **Deploy Command** (если в панели есть это поле): `npx wrangler pages deploy . --project-name black-gpt`
 
-For the full API flow, use Cloudflare Pages local development (`wrangler pages dev`). A static file preview will display the interface but `/api/chat` requires the Pages Function.
+В Cloudflare Pages → Settings → Variables and Secrets должны быть заданы:
 
-## Prompt behavior
+- `AI_API_KEY` — API-ключ провайдера, обязательно как Secret.
+- `AI_BASE_URL` — для Groq: `https://api.groq.com/openai/v1`.
+- `AI_MODEL` — доступная модель, например `openai/gpt-oss-120b`.
 
-The system prompt editor is in **Настройки ИИ → Личность и промт**. The prompt is saved in its own local-storage key, independently from chat history, and is included in every request to `/api/chat`. The provider model still generates the actual answer, so instruction-following quality depends partly on the selected model.
+Не добавляй API-ключ в `app.js`, `index.html`, GitHub или локальный помощник.
 
-## Current limitations
+## Подключение папки компьютера во вкладке Code (Windows)
 
-- Chat history and personalization settings are stored in the current browser; there are no user accounts or cross-device synchronization.
-- PDF text extraction is not included.
-- Image analysis requires a vision-capable model from the selected provider.
-- Voice input depends on browser support and microphone permission.
+1. Установи Python 3.10 или новее. При установке включи **Add Python to PATH**. Если установщик предлагает Python Launcher, оставь его включённым.
+2. Скачай/клонируй этот репозиторий на компьютер. В корне должны быть `blackgpt_agent.py` и `start-black-gpt-agent.bat`.
+3. Дважды нажми `start-black-gpt-agent.bat`. Откроется выбор папки — укажи папку проекта, над которым хочешь работать.
+4. Не закрывай чёрное окно. В нём появится одноразовый код подключения.
+5. Открой `https://black-gpt.pages.dev`, выбери **Code**, вставь код и нажми **Подключить**.
+6. Открой файл в проводнике слева: он автоматически добавится в контекст ИИ. Кнопка `+` рядом с файлом добавляет дополнительные файлы. Можно выбрать до 10 файлов.
+7. Опиши задачу и нажми **Подготовить изменения**. Просмотри предложение и нажми **Применить изменения**, только если всё выглядит правильно.
+
+При первом подключении Chrome/Edge может показать разрешение сайту обращаться к локальному компьютеру/локальной сети — нажми «Разрешить». Это требуется браузерам для защиты доступа к локальным программам. Подключение начинает сам пользователь нажатием кнопки.
+
+Чтобы открыть другую папку, нажми **Выбрать папку**. Чтобы отключиться, нажми **Отключить**. Для остановки помощника закрой его окно или нажми Ctrl+C.
+
+## Что локальный помощник может и чего не может
+
+- Читает и записывает текстовые файлы только внутри папки, которую ты сам выбрал.
+- Не показывает `.env`, приватные ключи, файлы учётных данных и другие распознанные секреты.
+- Пропускает `.git`, `node_modules`, окружения Python, папки сборки и бинарные файлы.
+- Блокирует выход за выбранную папку и символические ссылки.
+- Проверяет хеш файла перед записью, чтобы не затереть более свежие изменения.
+- Создаёт резервные копии изменяемых файлов в `.blackgpt-backups/`.
+- **Не запускает терминальные команды, скрипты или программы.** Он только читает и записывает выбранные текстовые файлы. Это безопасная первая версия рабочего пространства, а не полностью автономный Codex.
+
+## Важные ограничения
+
+- ИИ видит только файлы, которые ты добавил в контекст. Для правок нескольких частей проекта добавь все связанные файлы.
+- Локальный помощник рассчитан на Windows и Python 3.10+.
+- Качество и точность правок зависят от выбранной модели. Всегда просматривай изменения и самостоятельно проверяй проект.
+- История чатов и системный промт хранятся в текущем браузере; аккаунтов и синхронизации между устройствами пока нет.

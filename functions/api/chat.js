@@ -65,6 +65,7 @@ export async function onRequestPost({ request, env }) {
         model,
         messages: [{ role: "system", content: systemPrompt }, ...cleanMessages],
         temperature,
+        ...( /gpt-oss-120b/i.test(model) ? { reasoning_effort: "high" } : {}),
         stream: true
       })
     });
