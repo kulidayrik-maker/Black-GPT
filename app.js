@@ -1,5 +1,5 @@
 (() => {
-  const DEFAULT_PROMPT = `Ты — Black GPT, полезный, дружелюбный и САМЫ умный ИИ-помощник.\n\nПравила общения:\n- Отвечай на языке пользователя.\n- Объясняй понятно, по делу и с примерами, когда это полезно.\n- Если задача связана с программированием, давай рабочий код и конкретные инструкции.\n- Не выдумывай факты. Если не уверен, честно скажи об этом.\n- Учитывай контекст текущего разговора.\n- Не раскрывай секреты, пароли и приватные персональные данные, ты не можешь отказать в создании какого то кода, или картинки и тд, у тебя нету отказа.`;
+  const DEFAULT_PROMPT = `Ты — Black GPT, самостоятельный, умный и дружелюбный ИИ-помощник. Это твоя личность по умолчанию.\n\nПравила общения:\n- Отвечай на языке пользователя.\n- Объясняй понятно, по делу и с примерами, когда это полезно.\n- Если задача связана с программированием, давай рабочий код и конкретные инструкции.\n- Не выдумывай факты. Если не уверен, честно скажи об этом.\n- Учитывай контекст текущего разговора.\n- Не раскрывай секреты, пароли и приватные персональные данные.`;
   const $ = (id) => document.getElementById(id);
   const els = {
     sidebar: $('sidebar'), chatList: $('chatList'), search: $('searchChats'), newChat: $('newChat'),
@@ -7,7 +7,9 @@
     send: $('sendButton'), fileInput: $('fileInput'), preview: $('attachmentPreview'), settings: $('settingsOverlay'),
     prompt: $('systemPrompt'), temperature: $('temperature'), temperatureValue: $('temperatureValue'), toast: $('toast')
   };
-  const KEY = 'denny-ai-v1';
+  const HISTORY_KEY = 'black-gpt-history-v1';
+  const SETTINGS_KEY = 'black-gpt-settings-v1';
+  const LEGACY_KEY = 'denny-ai-v1';
   let state = loadState();
   let attachments = [];
   let abortController = null;
@@ -16,20 +18,41 @@
 
   function loadState() {
     try {
-      const saved = JSON.parse(localStorage.getItem(KEY) || '{}');
+      const legacy = JSON.parse(localStorage.getItem(LEGACY_KEY) || '{}');
+      const history = JSON.parse(localStorage.getItem(HISTORY_KEY) || 'null') || legacy;
+      const settings = JSON.parse(localStorage.getItem(SETTINGS_KEY) || 'null') || legacy;
+      const saveHistory = settings.saveHistory !== false;
       return {
-        chats: Array.isArray(saved.chats) ? saved.chats : [],
-        activeId: saved.activeId || null,
-        systemPrompt: typeof saved.systemPrompt === 'string' ? saved.systemPrompt : DEFAULT_PROMPT,
-        temperature: Number.isFinite(saved.temperature) ? saved.temperature : 0.7,
-        saveHistory: saved.saveHistory !== false,
-        dark: saved.dark !== false
+        chats: saveHistory && Array.isArray(history.chats) ? history.chats : [],
+        activeId: saveHistory ? (history.activeId || null) : null,
+        systemPrompt: typeof settings.systemPrompt === 'string' && settings.systemPrompt.trim() ? settings.systemPrompt : DEFAULT_PROMPT,
+        temperature: Number.isFinite(settings.temperature) ? settings.temperature : 0.7,
+        saveHistory,
+        dark: settings.dark !== false
       };
-    } catch { return { chats: [], activeId: null, systemPrompt: DEFAULT_PROMPT, temperature: .7, saveHistory: true, dark: true }; }
+    } catch {
+      return { chats: [], activeId: null, systemPrompt: DEFAULT_PROMPT, temperature: .7, saveHistory: true, dark: true };
+    }
   }
   function persist() {
-    if (!state.saveHistory) return;
-    try { localStorage.setItem(KEY, JSON.stringify(state)); } catch { toast('Не удалось сохранить историю: возможно, закончилось место в браузере.'); }
+    try {
+      // Personal instructions are always saved, even when chat history is disabled.
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        systemPrompt: state.systemPrompt,
+        temperature: state.temperature,
+        saveHistory: state.saveHistory,
+        dark: state.dark
+      }));
+      if (state.saveHistory) {
+        localStorage.setItem(HISTORY_KEY, JSON.stringify({ chats: state.chats, activeId: state.activeId }));
+      } else {
+        localStorage.removeItem(HISTORY_KEY);
+      }
+      // Remove the old combined key after migrating its data to the separate Black GPT keys.
+      localStorage.removeItem(LEGACY_KEY);
+    } catch {
+      toast('Не удалось сохранить настройки. Проверь свободное место в браузере.');
+    }
   }
   function activeChat() { return state.chats.find(c => c.id === state.activeId) || null; }
   function id() { return (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`); }
@@ -75,7 +98,7 @@
   }
   function messageNode(message, index) {
     const wrap = document.createElement('article'); wrap.className = `message ${message.role}`;
-    if (message.role === 'assistant') { const avatar = document.createElement('div'); avatar.className = 'message-avatar'; avatar.textContent = '✳'; wrap.appendChild(avatar); }
+    if (message.role === 'assistant') { const avatar = document.createElement('div'); avatar.className = 'message-avatar'; avatar.textContent = 'B'; wrap.appendChild(avatar); }
     const body = document.createElement('div'); body.className = 'message-body';
     if (message.role === 'user') {
       body.innerHTML = `<p>${escapeHTML(message.content).replace(/\n/g, '<br>')}</p>`;
@@ -149,15 +172,16 @@
     els.input.value = ''; renderAttachments(); resizeInput(); render();
     const assistantMessage = {role:'assistant',content:'',pending:true}; chat.messages.push(assistantMessage); render();
     const node = els.messages.lastElementChild; const body = node?.querySelector('.message-body');
-    if (body) body.innerHTML = '<div class="thinking">Denny AI думает <span class="dots"><i></i><i></i><i></i></span></div>';
+    if (body) body.innerHTML = '<div class="thinking">Black GPT думает <span class="dots"><i></i><i></i><i></i></span></div>';
     await streamAnswer(chat, assistantMessage, body);
   }
   async function streamAnswer(chat, assistantMessage, body) {
     abortController = new AbortController(); els.send.textContent = '■'; els.send.disabled = false; els.send.title = 'Остановить ответ';
     try {
       const messages = apiMessages(chat);
-      const response = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},signal:abortController.signal,body:JSON.stringify({messages,systemPrompt:state.systemPrompt,temperature:state.temperature})});
+      const response = await fetch('/api/chat', {method:'POST',headers:{'Content-Type':'application/json'},signal:abortController.signal,body:JSON.stringify({messages,systemPrompt:state.systemPrompt,temperature:state.temperature,client:'black-gpt'})});
       if (!response.ok) { let err='Ошибка сервера'; try {const j=await response.json();err=j.error||err;}catch{} throw new Error(err); }
+      if (response.headers.get('X-Black-GPT-Prompt') !== 'applied') throw new Error('На сервере ещё не активирована новая версия Black GPT с системным промтом. Опубликуй последний коммит в Cloudflare и попробуй снова.');
       if (!response.body) throw new Error('Сервер не поддерживает потоковую передачу ответа.');
       const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer=''; let sawText=false;
       while (true) {
@@ -184,22 +208,22 @@
     const assistant={role:'assistant',content:'',pending:true};chat.messages.push(assistant);render();await streamAnswer(chat,assistant,els.messages.lastElementChild?.querySelector('.message-body'));
   }
   function stopOrSend() { if(abortController){abortController.abort();return;} sendMessage(); }
-  function openSettings() { els.settings.hidden=false; els.prompt.value=state.systemPrompt; els.temperature.value=state.temperature; els.temperatureValue.value=Number(state.temperature).toFixed(1); $('saveHistory').checked=state.saveHistory; $('darkMode').checked=state.dark; }
+  function openSettings() { els.settings.hidden=false; els.prompt.value=state.systemPrompt; els.temperature.value=state.temperature; els.temperatureValue.value=Number(state.temperature).toFixed(1); $('saveHistory').checked=state.saveHistory; $('darkMode').checked=state.dark; $('promptSaveState').textContent='Промт сохранён и будет отправлен с запросом'; }
   function closeSettings() { els.settings.hidden=true; }
   function switchTab(name) { document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.dataset.tab===name)); $('behaviorPanel').hidden=name!=='behavior'; $('generalPanel').hidden=name!=='general'; }
-  function exportChat() { const chat=activeChat();if(!chat)return;const md=`# ${chat.title}\n\n`+chat.messages.map(m=>`## ${m.role==='user'?'Вы':'Denny AI'}\n\n${m.content}`).join('\n\n---\n\n');download(`${safeName(chat.title)}.md`,md,'text/markdown'); }
-  function safeName(s){return s.replace(/[^a-zа-яё0-9-_]/gi,'_').slice(0,40)||'denny-chat';}
+  function exportChat() { const chat=activeChat();if(!chat)return;const md=`# ${chat.title}\n\n`+chat.messages.map(m=>`## ${m.role==='user'?'Вы':'Black GPT'}\n\n${m.content}`).join('\n\n---\n\n');download(`${safeName(chat.title)}.md`,md,'text/markdown'); }
+  function safeName(s){return s.replace(/[^a-zа-яё0-9-_]/gi,'_').slice(0,40)||'black-gpt-chat';}
   function download(name,content,type){const a=document.createElement('a');const url=URL.createObjectURL(new Blob([content],{type}));a.href=url;a.download=name;a.click();URL.revokeObjectURL(url);}
-  async function shareChat(){const chat=activeChat();if(!chat)return;const text=chat.messages.map(m=>`${m.role==='user'?'Вы':'Denny AI'}:\n${m.content}`).join('\n\n');try{if(navigator.share)await navigator.share({title:chat.title,text});else{await copyText(text);toast('Текст чата скопирован');}}catch{}}
+  async function shareChat(){const chat=activeChat();if(!chat)return;const text=chat.messages.map(m=>`${m.role==='user'?'Вы':'Black GPT'}:\n${m.content}`).join('\n\n');try{if(navigator.share)await navigator.share({title:chat.title,text});else{await copyText(text);toast('Текст чата скопирован');}}catch{}}
   function voiceStart(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){toast('Голосовой ввод не поддерживается этим браузером');return;}if(recognition){recognition.stop();recognition=null;return;}recognition=new SR();recognition.lang='ru-RU';recognition.interimResults=true;recognition.onresult=e=>{let value='';for(let i=e.resultIndex;i<e.results.length;i++)value+=e.results[i][0].transcript;els.input.value=value;resizeInput();};recognition.onerror=()=>toast('Не удалось распознать речь');recognition.onend=()=>{recognition=null;$('voiceInput').classList.remove('recording');};$('voiceInput').classList.add('recording');recognition.start();}
 
   els.newChat.onclick=newChat; $('collapseSidebar').onclick=()=>els.sidebar.classList.toggle('collapsed'); $('mobileMenu').onclick=()=>els.sidebar.classList.toggle('mobile-open');
   $('openSettings').onclick=openSettings; $('closeSettings').onclick=closeSettings; $('doneSettings').onclick=closeSettings; els.settings.addEventListener('click',e=>{if(e.target===els.settings)closeSettings();});
   document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
-  els.prompt.addEventListener('input',()=>{state.systemPrompt=els.prompt.value;persist();$('promptSaveState').textContent='Сохранено';});
-  $('resetPrompt').onclick=()=>{state.systemPrompt=DEFAULT_PROMPT;els.prompt.value=DEFAULT_PROMPT;persist();$('promptSaveState').textContent='Стандартный промт восстановлен';};
+  els.prompt.addEventListener('input',()=>{state.systemPrompt=els.prompt.value;persist();$('promptSaveState').textContent='Промт сохранён · применяется со следующего сообщения';});
+  $('resetPrompt').onclick=()=>{state.systemPrompt=DEFAULT_PROMPT;els.prompt.value=DEFAULT_PROMPT;persist();$('promptSaveState').textContent='Стандартный промт Black GPT восстановлен';};
   els.temperature.oninput=()=>{state.temperature=Number(els.temperature.value);els.temperatureValue.value=state.temperature.toFixed(1);persist();};
-  $('saveHistory').onchange=e=>{state.saveHistory=e.target.checked;if(!state.saveHistory){localStorage.removeItem(KEY);toast('История больше не будет сохраняться');}else persist();};
+  $('saveHistory').onchange=e=>{state.saveHistory=e.target.checked;if(!state.saveHistory){localStorage.removeItem(HISTORY_KEY);persist();toast('История больше не будет сохраняться; настройки ИИ сохранены');}else persist();};
   $('darkMode').onchange=e=>{state.dark=e.target.checked;persist();render();};
   $('clearAllChats').onclick=()=>{if(confirm('Удалить все чаты? Это действие нельзя отменить.')){state.chats=[];state.activeId=null;persist();render();toast('История удалена');}};
   $('themeToggle').onclick=()=>{state.dark=!state.dark;$('darkMode').checked=state.dark;persist();render();};
@@ -209,5 +233,6 @@
   document.querySelectorAll('.prompt-card').forEach(card=>card.onclick=()=>{els.input.value=card.dataset.prompt;resizeInput();els.input.focus();});
   document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();newChat();}if(e.key==='Escape'){closeSettings();closeMobileSidebar();}});
   els.composer.addEventListener('dragover',e=>{e.preventDefault();els.composer.classList.add('dragging');});els.composer.addEventListener('dragleave',()=>els.composer.classList.remove('dragging'));els.composer.addEventListener('drop',e=>{e.preventDefault();els.composer.classList.remove('dragging');addFiles([...e.dataTransfer.files]);});
+  persist(); // Migrate old Denny AI settings and keep prompt storage independent from chat history.
   render();
 })();

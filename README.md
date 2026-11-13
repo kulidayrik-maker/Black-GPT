@@ -1,38 +1,40 @@
-# Denny AI
+# Black GPT
 
-ChatGPT-inspired personal AI chat interface. This is an independent project and is not affiliated with OpenAI.
+Black GPT is an independent AI chat application with its own visual identity and an editable system prompt. It is not affiliated with OpenAI and does not copy ChatGPT branding.
 
 ## Included
 
-- Responsive chat layout with sidebar and chat history
-- Streaming assistant responses
-- Editable system prompt in Settings → Поведение ИИ
+- Responsive Black GPT interface with dark/light themes
+- Chat history, search, rename, delete, export and sharing
+- Streaming assistant replies
+- Custom system prompt that is sent with every API request and saved separately from chat history
 - Temperature control
-- Local chat history, search, rename, delete, export to Markdown
-- Image and text-file attachments (image support depends on the selected model/provider)
-- Voice dictation in browsers that support the Web Speech API
-- Cloudflare Pages Function proxy so the API key is not exposed in the browser
+- Image and text-file attachments (image support depends on the selected model)
+- Voice dictation in browsers that support Web Speech API
+- Cloudflare Pages Function proxy; the API key is never placed in browser code
 
-## Deploy to Cloudflare Pages
+## Cloudflare Pages deployment
 
-1. Create a new Pages project and upload/deploy the contents of this folder (the `functions` folder must stay at the project root).
-2. In Cloudflare Pages → your project → Settings → Environment variables, add:
-   - `AI_API_KEY` — your provider API key (mark it as a secret).
-   - `AI_BASE_URL` — for Groq use `https://api.groq.com/openai/v1`.
+1. Keep `index.html`, `app.js`, `styles.css`, `wrangler.toml`, and the `functions` directory at the project root.
+2. In Cloudflare Pages → Settings → Variables and Secrets, add these for Production (and Preview if needed):
+   - `AI_API_KEY` — provider API key, stored as a secret.
+   - `AI_BASE_URL` — for Groq: `https://api.groq.com/openai/v1`.
    - `AI_MODEL` — for example `openai/gpt-oss-120b`, or another model available to your provider.
-3. Add the variables for both Production and Preview if you need both environments.
-4. Redeploy the Pages project after adding or changing variables.
+3. Redeploy the Pages project after changing variables.
 
-The API key belongs only in Cloudflare environment variables. Do not paste it into `app.js`, `index.html`, or a public GitHub repository. Never put it in a browser-side `.env` file.
+Do not put the API key in `app.js`, `index.html`, GitHub, or a browser-side `.env` file.
 
 ## Local preview
 
-The UI can be previewed by serving this directory with a static web server, but chat replies require the Cloudflare Pages Function at `/api/chat`. To test the full application locally, use the Cloudflare Pages local development workflow (`wrangler pages dev`).
+For the full API flow, use Cloudflare Pages local development (`wrangler pages dev`). A static file preview will display the interface but `/api/chat` requires the Pages Function.
 
-## Notes and limitations
+## Prompt behavior
 
-- Chat history and the editable prompt are stored in this browser's local storage. There is no user account or cloud synchronization in this starter version.
-- PDF files are currently attached by name only; automatic PDF text extraction is not included.
-- Voice dictation depends on browser support and may require microphone permission.
-- Some providers/models do not accept image attachments. Choose a vision-capable model if image understanding is needed.
-- The UI resembles common AI chat applications but uses its own Denny AI identity and does not copy OpenAI branding or claim to be ChatGPT.
+The system prompt editor is in **Настройки ИИ → Личность и промт**. The prompt is saved in its own local-storage key, independently from chat history, and is included in every request to `/api/chat`. The provider model still generates the actual answer, so instruction-following quality depends partly on the selected model.
+
+## Current limitations
+
+- Chat history and personalization settings are stored in the current browser; there are no user accounts or cross-device synchronization.
+- PDF text extraction is not included.
+- Image analysis requires a vision-capable model from the selected provider.
+- Voice input depends on browser support and microphone permission.
