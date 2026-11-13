@@ -46,6 +46,7 @@
           <nav class="view-switch" aria-label="Режим работы">
             <button class="view-switch-btn active" id="showChatView" type="button">✧ <span>Чат</span></button>
             <button class="view-switch-btn" id="showCodeView" type="button">⌘ <span>Code</span></button>
+            <button class="view-switch-btn" id="showImageView" type="button">▧ <span>Изображения</span></button>
           </nav>
         </div>
         <div class="topbar-right">
@@ -91,65 +92,103 @@
       </div>
       </div>
 
-      <section class="code-view" id="codeView" hidden>
-        <div class="code-heading">
-          <div>
-            <div class="code-eyebrow"><span class="code-eyebrow-dot"></span> BLACK GPT / DEVELOPER WORKSPACE</div>
-            <h1>Создавай без границ<span>.</span></h1>
-            <p>Подключи папку на компьютере и работай над кодом вместе с Black GPT.</p>
+      <section class="code-view ide-view" id="codeView" hidden>
+        <div class="ide-toolbar">
+          <div class="ide-project-mark"><span class="ide-logo">⌘</span><div><strong>Code workspace</strong><small id="workspaceTitle">Локальная рабочая папка</small></div></div>
+          <div class="ide-toolbar-center">
+            <span class="agent-status-dot" id="agentStatusDot"></span><span id="agentStatusText">Компьютер не подключён</span>
           </div>
-          <div class="code-heading-status"><span class="agent-status-dot" id="agentStatusDot"></span><span id="agentStatusText">Компьютер не подключён</span></div>
+          <div class="ide-connect-controls">
+            <span id="agentHelp" hidden>Локальный помощник Black GPT</span>
+            <input id="agentToken" class="agent-token-input" type="password" autocomplete="off" placeholder="Код подключения" aria-label="Код локального помощника">
+            <button id="connectAgent" class="code-primary-btn" type="button">Подключить ПК</button>
+            <button id="chooseWorkspace" class="code-secondary-btn" type="button" disabled>Открыть папку</button>
+          </div>
         </div>
 
-        <div class="agent-connect-card">
-          <div class="agent-connect-icon">⌘</div>
-          <div class="agent-connect-copy">
-            <strong>Подключение к компьютеру</strong>
-            <span id="agentHelp">Запусти <b>start-black-gpt-agent.bat</b> на ПК, затем введи код подключения из открывшегося окна.</span>
-          </div>
-          <input id="agentToken" class="agent-token-input" type="password" autocomplete="off" placeholder="Код подключения" aria-label="Код локального помощника">
-          <button id="connectAgent" class="code-primary-btn" type="button">Подключить</button>
-          <button id="chooseWorkspace" class="code-secondary-btn" type="button" disabled>Выбрать папку</button>
-        </div>
-
-        <div class="code-layout">
-          <aside class="code-pane explorer-pane">
-            <div class="code-pane-title"><span>ПРОЕКТ</span><div class="code-pane-actions"><button id="refreshTree" title="Обновить файлы" type="button">↻</button><button id="newCodeFile" title="Новый файл" type="button">＋</button></div></div>
+        <div class="ide-layout">
+          <aside class="code-pane explorer-pane ide-explorer">
+            <div class="ide-pane-heading"><div><span class="ide-pane-overline">WORKSPACE</span><strong>Проводник</strong></div><div class="code-pane-actions"><button id="refreshTree" title="Обновить файлы" type="button">↻</button><button id="newCodeFile" title="Новый файл" type="button">＋</button></div></div>
             <div class="workspace-path" id="workspacePath">Папка не выбрана</div>
-            <div class="file-tree" id="fileTree"><div class="code-empty-state"><span>▤</span><strong>Здесь появятся файлы проекта</strong><small>Подключи компьютер, чтобы открыть папку.</small></div></div>
-            <div class="explorer-foot"><span class="file-count" id="fileCount">0 файлов</span><span>Локальные файлы</span></div>
+            <label class="file-search"><span>⌕</span><input id="fileSearch" type="search" placeholder="Поиск файлов…" autocomplete="off"></label>
+            <div class="tree-label"><span>ФАЙЛЫ</span><span id="fileCount">0 файлов</span></div>
+            <div class="file-tree" id="fileTree"><div class="code-empty-state"><span>▤</span><strong>Твой проект появится здесь</strong><small>Подключи компьютер и выбери папку проекта.</small></div></div>
+            <div class="explorer-foot"><span>◈ Локальная папка</span><span id="contextCountExplorer">0 в контексте</span></div>
           </aside>
 
-          <section class="code-pane editor-pane">
-            <div class="editor-topbar">
+          <section class="code-pane editor-pane ide-editor-pane">
+            <div class="editor-topbar ide-editor-header">
               <div class="editor-file-label"><span class="editor-file-icon">◇</span><strong id="activeFileName">Редактор</strong><span id="dirtyMark" class="dirty-mark" hidden>●</span></div>
-              <div class="editor-actions"><button id="discardFileChanges" class="code-quiet-btn" type="button" disabled>Отменить</button><button id="saveCodeFile" class="code-save-btn" type="button" disabled>Сохранить файл</button></div>
+              <div class="editor-actions"><button id="discardFileChanges" class="code-quiet-btn" type="button" disabled>Отменить</button><button id="saveCodeFile" class="code-save-btn" type="button" disabled>Сохранить <span>⌘S</span></button></div>
             </div>
             <div class="editor-subbar"><span id="editorFilePath">Выбери файл в проводнике</span><span id="editorLanguage">TEXT</span></div>
-            <textarea id="codeEditor" class="code-editor" spellcheck="false" autocapitalize="off" autocomplete="off" disabled placeholder="После подключения выбери файл слева — его код появится здесь."></textarea>
-            <div class="editor-statusbar"><span id="editorStatus">Редактор ожидает подключения</span><span>UTF-8 · LF</span></div>
+            <div class="editor-tabs" id="editorTabs"><span class="editor-tabs-empty">Открытые файлы появятся здесь</span></div>
+            <div class="editor-stage"><div id="monacoEditor" class="monaco-editor" aria-label="Редактор кода"></div><textarea id="codeEditor" class="code-editor" spellcheck="false" autocapitalize="off" autocomplete="off" disabled placeholder="Подключи компьютер и открой файл слева."></textarea></div>
+            <div class="editor-statusbar"><span id="editorStatus">Редактор ожидает подключения</span><span>UTF-8 <i></i> LF <i></i> <span id="editorCursor">Строка 1, столбец 1</span></span></div>
           </section>
 
-          <aside class="code-pane code-ai-pane">
-            <div class="code-ai-header"><div class="code-ai-avatar">B</div><div><strong>Black GPT Code</strong><small>AI-разработчик проекта</small></div><span class="code-ai-online">AI</span></div>
+          <aside class="code-pane code-ai-pane ide-ai-pane">
+            <div class="code-ai-header"><div class="code-ai-avatar">B</div><div><strong>Black GPT Code</strong><small>Твой AI-разработчик</small></div><span class="code-ai-online">ONLINE</span></div>
             <div class="code-ai-body">
-              <div class="code-ai-intro"><span class="code-ai-spark">✦</span><strong>Что будем создавать?</strong><p>Опиши задачу. Я изучу выбранные файлы и подготовлю изменения. Ничего не запишется на диск без твоего подтверждения.</p></div>
-              <div class="context-box"><div class="context-heading"><span>КОНТЕКСТ ДЛЯ ИИ</span><span id="contextCount">0 файлов</span></div><div id="contextFiles" class="context-files"><span class="context-empty">Открой файл слева, чтобы добавить его в контекст.</span></div></div>
-              <label class="code-task-label" for="codeTask">ТВОЯ ЗАДАЧА</label>
-              <textarea id="codeTask" class="code-task" rows="5" placeholder="Например: сделай адаптивное меню, исправь ошибку авторизации или добавь новую функцию..."></textarea>
-              <button id="askCodeAI" class="code-generate-btn" type="button" disabled><span>✦</span> Подготовить изменения <span>↗</span></button>
-              <div class="code-ai-hint">Изменения сначала появятся в предпросмотре. Ты сам решаешь, применять их или нет.</div>
+              <div class="code-ai-intro"><div class="code-ai-intro-top"><span class="code-ai-spark">✦</span><span class="ai-mode-pill">BUILD MODE</span></div><strong>Что будем строить?</strong><p>Опиши результат обычными словами. Я изучу контекст проекта, подготовлю связанные изменения и покажу diff перед записью.</p></div>
+              <div class="context-box"><div class="context-heading"><span>КОНТЕКСТ ПРОЕКТА</span><span id="contextCount">0 файлов</span></div><div id="contextFiles" class="context-files"><span class="context-empty">Открывай файлы слева или добавляй их кнопкой +.</span></div></div>
+              <div class="quick-task-label">БЫСТРЫЕ ЗАДАЧИ</div>
+              <div class="quick-task-grid">
+                <button type="button" class="quick-task" data-code-task="Изучи выбранные файлы, найди ошибки и предложи безопасные исправления. Не меняй код без необходимости.">⌕ <span>Найти ошибки</span></button>
+                <button type="button" class="quick-task" data-code-task="Улучши дизайн интерфейса: сделай его современным, адаптивным и аккуратным, сохранив существующую функциональность.">✧ <span>Улучшить UI</span></button>
+                <button type="button" class="quick-task" data-code-task="Объясни архитектуру выбранных файлов и как они связаны между собой. Не изменяй файлы.">⌘ <span>Разобрать проект</span></button>
+                <button type="button" class="quick-task" data-code-task="Оптимизируй выбранный код: читаемость, производительность, обработка ошибок и безопасность. Сохрани совместимость.">↗ <span>Оптимизировать</span></button>
+              </div>
+              <label class="code-task-label" for="codeTask">ОПИШИ, ЧТО НУЖНО СДЕЛАТЬ</label>
+              <textarea id="codeTask" class="code-task" rows="5" placeholder="Например: создай адаптивное меню, исправь авторизацию или добавь новую функцию…"></textarea>
+              <div class="code-task-footer"><span>Ctrl + Enter — отправить</span><span id="codeTaskCount">0 / 2000</span></div>
+              <button id="askCodeAI" class="code-generate-btn" type="button" disabled><span>✦</span> Анализировать и подготовить код <span>↗</span></button>
+              <div class="code-ai-hint">ИИ сначала предложит изменения. Файлы на компьютере не меняются без твоего подтверждения.</div>
               <div class="code-proposal" id="codeProposal" hidden>
-                <div class="proposal-heading"><span class="proposal-check">✓</span><strong>Предложение готово</strong></div>
+                <div class="proposal-heading"><span class="proposal-check">✓</span><strong>План изменений готов</strong></div>
                 <p id="proposalSummary"></p>
                 <div class="proposal-files" id="proposalFiles"></div>
-                <div class="proposal-preview-wrap"><div class="proposal-preview-head"><span>ПРЕДПРОСМОТР</span><span id="proposalPreviewName"></span></div><pre id="proposalPreview"></pre></div>
-                <div class="proposal-actions"><button id="rejectProposal" class="code-secondary-btn" type="button">Отменить</button><button id="applyProposal" class="code-primary-btn" type="button">Применить изменения</button></div>
+                <div class="proposal-preview-wrap"><div class="proposal-preview-head"><span>DIFF PREVIEW</span><span id="proposalPreviewName"></span></div><pre id="proposalPreview"></pre></div>
+                <div class="proposal-actions"><button id="rejectProposal" class="code-secondary-btn" type="button">Отклонить</button><button id="applyProposal" class="code-primary-btn" type="button">Применить</button></div>
               </div>
             </div>
           </aside>
         </div>
-        <div class="code-safety-note"><span>◈</span> Black GPT работает только внутри выбранной папки. Секретные файлы (.env, ключи, пароли) скрыты. Перед записью создаётся резервная копия.</div>
+        <div class="ide-statusbar"><span><b class="status-live"></b> Локальный режим</span><span>Black GPT Code <i></i> Изменения только после подтверждения <i></i> Защита секретов включена</span></div>
+      </section>
+
+      <section class="image-view" id="imageView" hidden>
+        <div class="image-workspace-header">
+          <div><div class="image-eyebrow"><span></span> BLACK GPT / CREATIVE STUDIO</div><h1>Преврати идею <em>в изображение.</em></h1><p>Опиши, что хочешь увидеть — Black GPT создаст изображение по твоему описанию.</p></div>
+          <div class="image-engine-chip"><span>✦</span><div><strong>GPT Image</strong><small>AI image generation</small></div></div>
+        </div>
+        <div class="image-workspace">
+          <section class="image-create-panel">
+            <div class="image-panel-title"><span class="image-panel-icon">✧</span><div><strong>Создать изображение</strong><small>Подробное описание даёт лучший результат</small></div></div>
+            <label class="image-field-label" for="imagePrompt">ТВОЯ ИДЕЯ</label>
+            <textarea id="imagePrompt" class="image-prompt" rows="7" maxlength="5000" placeholder="Например: кинематографичный ночной город после дождя, отражения неоновых вывесок, реалистичная фотография, мягкий туман, высокая детализация…"></textarea>
+            <div class="image-prompt-footer"><span>Пиши на русском или английском</span><span id="imagePromptCount">0 / 5000</span></div>
+            <div class="image-options-grid">
+              <label><span>ФОРМАТ</span><select id="imageSize"><option value="1024x1024">Квадрат · 1:1</option><option value="1536x1024">Альбом · 3:2</option><option value="1024x1536">Портрет · 2:3</option></select></label>
+              <label><span>КАЧЕСТВО</span><select id="imageQuality"><option value="medium">Высокое</option><option value="high">Максимальное</option><option value="low">Быстрое</option></select></label>
+            </div>
+            <div class="image-style-heading">СТИЛЬ ИЗОБРАЖЕНИЯ</div>
+            <div class="image-style-list">
+              <button class="image-style active" type="button" data-style="">Авто</button>
+              <button class="image-style" type="button" data-style="Фотореализм, профессиональная фотография, натуральный свет">Фотореализм</button>
+              <button class="image-style" type="button" data-style="3D render, premium cinematic CGI, detailed materials">3D</button>
+              <button class="image-style" type="button" data-style="Digital illustration, rich colors, polished concept art">Иллюстрация</button>
+              <button class="image-style" type="button" data-style="Anime style, beautiful clean line art, expressive lighting">Аниме</button>
+              <button class="image-style" type="button" data-style="Minimal premium brand identity, clean vector logo design">Логотип</button>
+            </div>
+            <button id="generateImage" class="image-generate-btn" type="button"><span>✦</span> Создать изображение <b>↗</b></button>
+            <p class="image-cost-note">Для генерации нужен отдельный API-ключ OpenAI. Ключ хранится только в Cloudflare.</p>
+          </section>
+          <section class="image-results-panel">
+            <div class="image-results-head"><div><span class="image-results-overline">YOUR CREATIONS</span><strong>Галерея</strong></div><span id="imageStatus" class="image-status">Пока пусто</span></div>
+            <div id="imageGallery" class="image-gallery"><div class="image-empty"><div class="image-empty-orbit"><span>✧</span></div><strong>Здесь появится твоё изображение</strong><p>Начни с идеи слева. Можно создавать обои, аватары, иллюстрации, концепты и многое другое.</p><div class="image-example-tags"><span>Обои</span><span>Аватар</span><span>Концепт</span><span>Иллюстрация</span></div></div></div>
+          </section>
+        </div>
       </section>
     </main>
   </div>
@@ -184,6 +223,7 @@
   </div>
 
   <div class="toast" id="toast" role="status"></div>
+  <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/vs/loader.js" onerror="document.documentElement.dataset.monaco='unavailable'"></script>
   <script src="app.js"></script>
 </body>
 </html>

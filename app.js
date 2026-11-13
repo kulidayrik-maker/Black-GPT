@@ -34,6 +34,11 @@
   let abortController = null;
   let toastTimer;
   let recognition = null;
+  let monacoEditor = null;
+  let openCodeTabs = [];
+  let selectedImageStyle = '';
+  let generatedImages = [];
+  let imageBusy = false;
 
   function loadState() {
     try {
@@ -246,14 +251,128 @@
 
   function switchView(view) {
     const code = view === 'code';
-    $('chatView').hidden = code;
+    const images = view === 'images';
+    $('chatView').hidden = code || images;
     $('codeView').hidden = !code;
-    $('showChatView').classList.toggle('active', !code);
+    $('imageView').hidden = !images;
+    $('showChatView').classList.toggle('active', !code && !images);
     $('showCodeView').classList.toggle('active', code);
-    $('exportChat').hidden = code;
-    $('shareChat').hidden = code;
+    $('showImageView').classList.toggle('active', images);
+    $('exportChat').hidden = code || images;
+    $('shareChat').hidden = code || images;
     closeMobileSidebar();
-    if (code) setTimeout(() => $('codeTask').focus(), 80);
+    if (code) setTimeout(() => { $('codeTask').focus(); monacoEditor?.layout(); }, 80);
+    if (images) setTimeout(() => $('imagePrompt').focus(), 80);
+  }
+
+  function currentEditorValue() {
+    return monacoEditor ? monacoEditor.getValue() : $('codeEditor').value;
+  }
+
+  function setEditorValue(value) {
+    const text = String(value ?? '');
+    $('codeEditor').value = text;
+    if (monacoEditor && monacoEditor.getValue() !== text) monacoEditor.setValue(text);
+  }
+
+  function languageForPath(path) {
+    const ext = (path.split('.').pop() || '').toLowerCase();
+    return ({js:'javascript',mjs:'javascript',cjs:'javascript',ts:'typescript',tsx:'typescript',jsx:'javascript',py:'python',html:'html',css:'css',scss:'scss',json:'json',md:'markdown',markdown:'markdown',yml:'yaml',yaml:'yaml',toml:'ini',sh:'shell',bash:'shell',bat:'bat',ps1:'powershell',sql:'sql',xml:'xml',svg:'xml',java:'java',go:'go',rs:'rust',cpp:'cpp',c:'c',cs:'csharp',php:'php',rb:'ruby',txt:'plaintext'})[ext] || 'plaintext';
+  }
+
+  function initMonaco() {
+    if (!window.require || !$('monacoEditor')) return;
+    const versionRoot = 'https://cdn.jsdelivr.net/npm/monaco-editor@0.52.2/min/';
+    window.MonacoEnvironment = {
+      getWorkerUrl: function () {
+        const worker = `self.MonacoEnvironment={baseUrl:'${versionRoot}'};importScripts('${versionRoot}vs/base/worker/workerMain.js');`;
+        return `data:text/javascript;charset=utf-8,${encodeURIComponent(worker)}`;
+      }
+    };
+    window.require.config({ paths: { vs: `${versionRoot}vs` } });
+    window.require(['vs/editor/editor.main'], function () {
+      window.monaco.editor.defineTheme('blackgpt-dark', {
+        base: 'vs-dark', inherit: true,
+        rules: [
+          { token: 'comment', foreground: '71809a', fontStyle: 'italic' },
+          { token: 'keyword', foreground: 'c5a6ff' },
+          { token: 'string', foreground: '9ed9b5' },
+          { token: 'number', foreground: 'e6bc87' },
+          { token: 'type', foreground: '78c8d6' }
+        ],
+        colors: {
+          'editor.background': '#0b0e15', 'editor.foreground': '#d9e2f2',
+          'editorLineNumber.foreground': '#45516a', 'editorLineNumber.activeForeground': '#b8a8ff',
+          'editorCursor.foreground': '#b8a8ff', 'editor.selectionBackground': '#8170df45',
+          'editor.lineHighlightBackground': '#ffffff07', 'editorIndentGuide.background1': '#ffffff0d',
+          'editorIndentGuide.activeBackground1': '#a99aff55', 'editorWidget.background': '#151a27'
+        }
+      });
+      window.monaco.editor.defineTheme('blackgpt-light', {
+        base: 'vs', inherit: true, rules: [], colors: {
+          'editor.background': '#fbfcff', 'editorLineNumber.foreground': '#a3adc0',
+          'editorLineNumber.activeForeground': '#6356ad', 'editorCursor.foreground': '#7667cb',
+          'editor.selectionBackground': '#9789e733', 'editor.lineHighlightBackground': '#6677990b'
+        }
+      });
+      monacoEditor = window.monaco.editor.create($('monacoEditor'), {
+        value: '', language: 'plaintext', theme: state.dark ? 'blackgpt-dark' : 'blackgpt-light',
+        automaticLayout: true, minimap: { enabled: false }, fontFamily: 'Cascadia Code, Fira Code, Consolas, monospace',
+        fontSize: 13, lineHeight: 22, tabSize: 2, insertSpaces: true, scrollBeyondLastLine: false,
+        smoothScrolling: true, cursorBlinking: 'smooth', renderLineHighlight: 'all', bracketPairColorization: { enabled: true },
+        padding: { top: 14, bottom: 18 }, wordWrap: 'off', glyphMargin: false, folding: true,
+        lineNumbers: 'on', roundedSelection: true, overviewRulerBorder: false, contextmenu: true
+      });
+      document.querySelector('.editor-stage').classList.add('monaco-ready');
+      monacoEditor.onDidChangeModelContent(() => {
+        $('codeEditor').value = monacoEditor.getValue();
+        updateEditorDirty();
+      });
+      monacoEditor.onDidChangeCursorPosition((event) => {
+        $('editorCursor').textContent = `Строка ${event.position.lineNumber}, столбец ${event.position.column}`;
+      });
+      if (currentCodePath && codeCache.has(currentCodePath)) {
+        setEditorValue(codeCache.get(currentCodePath).content);
+        window.monaco.editor.setModelLanguage(monacoEditor.getModel(), languageForPath(currentCodePath));
+      }
+    }, function () {
+      document.querySelector('.editor-stage').classList.remove('monaco-ready');
+      toast('Не удалось загрузить расширенный редактор. Включён обычный редактор.');
+    });
+  }
+
+  function renderEditorTabs() {
+    const bar = $('editorTabs');
+    if (!bar) return;
+    bar.innerHTML = '';
+    if (!openCodeTabs.length) {
+      const empty = document.createElement('span'); empty.className = 'editor-tabs-empty'; empty.textContent = 'Открытые файлы появятся здесь'; bar.appendChild(empty); return;
+    }
+    openCodeTabs.forEach(path => {
+      const tab = document.createElement('div'); tab.className = `editor-tab${path === currentCodePath ? ' active' : ''}`;
+      const icon = document.createElement('span'); icon.className = 'editor-tab-icon'; icon.textContent = fileIcon(`.${path.split('.').pop()}`);
+      const label = document.createElement('button'); label.type = 'button'; label.className = 'editor-tab-name'; label.textContent = path.split('/').pop(); label.title = path; label.onclick = () => openCodeFile(path);
+      const dirty = document.createElement('span'); dirty.className = 'editor-tab-dirty'; dirty.textContent = codeCache.get(path)?.dirty ? '●' : '';
+      const close = document.createElement('button'); close.type = 'button'; close.className = 'editor-tab-close'; close.textContent = '×'; close.title = 'Закрыть вкладку'; close.onclick = () => closeEditorTab(path);
+      tab.append(icon, label, dirty, close); bar.appendChild(tab);
+    });
+  }
+
+  async function closeEditorTab(path) {
+    const item = codeCache.get(path);
+    if (item?.dirty && !confirm(`В ${path} есть несохранённые изменения. Закрыть вкладку и отменить их?`)) return;
+    if (item?.dirty) { item.content = item.original; item.dirty = false; }
+    openCodeTabs = openCodeTabs.filter(tab => tab !== path);
+    if (currentCodePath === path) {
+      currentCodePath = openCodeTabs.at(-1) || '';
+      if (currentCodePath) await openCodeFile(currentCodePath);
+      else {
+        $('activeFileName').textContent = 'Редактор'; $('editorFilePath').textContent = 'Выбери файл в проводнике';
+        $('editorLanguage').textContent = 'TEXT'; $('codeEditor').value = ''; $('codeEditor').disabled = true;
+        setEditorValue(''); $('editorStatus').textContent = 'Выбери файл в проводнике';
+      }
+    }
+    renderEditorTabs(); renderFileTree();
   }
 
   async function agentRequest(path, options = {}) {
@@ -292,15 +411,16 @@
     if (agentConnected) {
       agentToken = '';
       workspaceFiles = [];
-      codeCache.clear(); contextPaths.clear(); currentCodePath = ''; codeProposal = null;
+      codeCache.clear(); contextPaths.clear(); openCodeTabs = []; currentCodePath = ''; codeProposal = null;
       $('agentToken').value = '';
       $('fileTree').innerHTML = '<div class="code-empty-state"><span>▤</span><strong>Компьютер отключён</strong><small>Запусти локальный помощник и подключись снова.</small></div>';
       $('workspacePath').textContent = 'Папка не выбрана';
-      $('codeEditor').value = ''; $('codeEditor').disabled = true;
+      $('codeEditor').value = ''; $('codeEditor').disabled = true; setEditorValue('');
       $('activeFileName').textContent = 'Редактор'; $('editorFilePath').textContent = 'Выбери файл в проводнике';
       $('contextFiles').innerHTML = '<span class="context-empty">Открой файл слева, чтобы добавить его в контекст.</span>';
       $('contextCount').textContent = '0 файлов'; $('fileCount').textContent = '0 файлов';
-      $('codeProposal').hidden = true;
+      $('codeProposal').hidden = true; renderEditorTabs();
+      $('workspaceTitle').textContent = 'Локальная рабочая папка';
       setAgentStatus(false, 'Компьютер не подключён');
       toast('Локальный компьютер отключён');
       return;
@@ -313,7 +433,7 @@
     try {
       const status = await agentRequest('/api/status');
       setAgentStatus(true, `Подключено · ${status.workspaceName || 'папка не выбрана'}`);
-      $('workspacePath').textContent = status.workspace || 'Папка не выбрана';
+      $('workspacePath').textContent = status.workspace || 'Папка не выбрана'; $('workspaceTitle').textContent = status.workspaceName || 'Локальная рабочая папка';
       await refreshWorkspace();
       toast('Компьютер подключён');
     } catch (error) {
@@ -331,11 +451,11 @@
       $('chooseWorkspace').disabled = true;
       const result = await agentRequest('/api/folder', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
       if (!result.ok) { toast('Выбор папки отменён'); return; }
-      workspaceFiles = []; codeCache.clear(); contextPaths.clear(); currentCodePath = ''; codeProposal = null;
-      $('codeEditor').value = ''; $('codeEditor').disabled = true;
+      workspaceFiles = []; codeCache.clear(); contextPaths.clear(); openCodeTabs = []; currentCodePath = ''; codeProposal = null;
+      $('codeEditor').value = ''; $('codeEditor').disabled = true; setEditorValue('');
       $('activeFileName').textContent = 'Редактор'; $('editorFilePath').textContent = 'Выбери файл в проводнике';
       $('codeProposal').hidden = true;
-      $('workspacePath').textContent = result.workspace;
+      $('workspacePath').textContent = result.workspace; $('workspaceTitle').textContent = result.workspaceName || 'Рабочая папка';
       setAgentStatus(true, `Подключено · ${result.workspaceName}`);
       await refreshWorkspace();
       toast(`Открыта папка ${result.workspaceName}`);
@@ -348,16 +468,17 @@
     try {
       const data = await agentRequest('/api/tree');
       workspaceFiles = Array.isArray(data.files) ? data.files : [];
-      $('workspacePath').textContent = data.workspace || 'Рабочая папка';
+      openCodeTabs = openCodeTabs.filter(path => workspaceFiles.some(item => item.path === path));
+      $('workspacePath').textContent = data.workspace || 'Рабочая папка'; $('workspaceTitle').textContent = data.workspace ? data.workspace.split(/[\\/]/).filter(Boolean).pop() : 'Рабочая папка';
       $('fileCount').textContent = `${workspaceFiles.length} файлов`;
       // Drop clean cached files so external edits are picked up on refresh; preserve unsaved editor buffers.
       for (const [path, file] of codeCache.entries()) if (!file.dirty) codeCache.delete(path);
       if (currentCodePath && !workspaceFiles.some(item => item.path === currentCodePath)) {
-        currentCodePath = ''; $('codeEditor').value = ''; $('codeEditor').disabled = true;
+        currentCodePath = ''; $('codeEditor').value = ''; $('codeEditor').disabled = true; setEditorValue('');
         $('activeFileName').textContent = 'Редактор'; $('editorFilePath').textContent = 'Выбери файл в проводнике';
       } else if (currentCodePath && !codeCache.has(currentCodePath)) {
         const current = await ensureCodeFileLoaded(currentCodePath);
-        $('codeEditor').value = current.content;
+        setEditorValue(current.content);
         updateEditorDirty();
       }
       renderFileTree();
@@ -370,20 +491,26 @@
       container.innerHTML = '<div class="code-empty-state"><span>▤</span><strong>Папка пока пустая</strong><small>Создай файл или выбери другую папку.</small></div>';
       renderContextFiles(); return;
     }
-    const sorted = [...workspaceFiles].sort((a,b) => a.path.localeCompare(b.path));
+    const filter = ($('fileSearch')?.value || '').trim().toLowerCase();
+    const sorted = [...workspaceFiles].filter(item => !filter || item.path.toLowerCase().includes(filter)).sort((a,b) => a.path.localeCompare(b.path));
     for (const item of sorted) {
       const row = document.createElement('div');
       row.className = `file-row${currentCodePath === item.path ? ' active' : ''}`;
+      const depth = Math.min(item.path.split('/').length - 1, 5);
+      row.style.paddingLeft = `${5 + depth * 12}px`;
       const open = document.createElement('button'); open.type = 'button'; open.className = 'file-open';
-      const icon = document.createElement('span'); icon.className = 'file-type-icon'; icon.textContent = fileIcon(item.extension);
-      const name = document.createElement('span'); name.className = 'file-row-name'; name.textContent = item.path;
-      open.append(icon, name); open.title = item.path; open.onclick = () => openCodeFile(item.path);
+      const icon = document.createElement('span'); icon.className = `file-type-icon ext-${(item.extension || '').replace('.','')}`; icon.textContent = fileIcon(item.extension);
+      const nameWrap = document.createElement('span'); nameWrap.className = 'file-name-wrap';
+      const name = document.createElement('span'); name.className = 'file-row-name'; name.textContent = item.path.split('/').pop();
+      const parent = document.createElement('small'); parent.className = 'file-parent'; parent.textContent = item.path.includes('/') ? item.path.split('/').slice(0,-1).join('/') : '';
+      nameWrap.append(name, parent); open.append(icon, nameWrap); open.title = item.path; open.onclick = () => openCodeFile(item.path);
       const ctx = document.createElement('button'); ctx.type = 'button'; ctx.className = `file-context-toggle${contextPaths.has(item.path) ? ' selected' : ''}`;
       ctx.textContent = contextPaths.has(item.path) ? '✓' : '+'; ctx.title = contextPaths.has(item.path) ? 'Убрать из контекста ИИ' : 'Добавить в контекст ИИ';
       ctx.onclick = async () => { if (contextPaths.has(item.path)) contextPaths.delete(item.path); else { if (contextPaths.size >= 10) { toast('Можно добавить максимум 10 файлов в контекст'); return; } try { await ensureCodeFileLoaded(item.path); contextPaths.add(item.path); } catch (e) { toast(e.message); } } renderFileTree(); renderContextFiles(); };
       row.append(open, ctx); container.appendChild(row);
     }
-    renderContextFiles();
+    if (!sorted.length) { container.innerHTML = '<div class="code-empty-state"><strong>Ничего не найдено</strong><small>Попробуй изменить поисковый запрос.</small></div>'; }
+    renderContextFiles(); renderEditorTabs();
   }
 
   function fileIcon(ext) {
@@ -400,33 +527,33 @@
   }
 
   async function openCodeFile(path) {
-    if (currentCodePath && codeCache.get(currentCodePath)?.dirty) {
-      if (!confirm('В текущем файле есть несохранённые изменения. Открыть другой файл без сохранения?')) return;
-      const old = codeCache.get(currentCodePath); old.content = old.original; old.dirty = false;
-    }
     try {
       const file = await ensureCodeFileLoaded(path);
       currentCodePath = path;
+      if (!openCodeTabs.includes(path)) openCodeTabs.push(path);
       if (contextPaths.has(path) || contextPaths.size < 10) contextPaths.add(path);
       else toast('Файл открыт, но в контекст уже добавлено 10 файлов');
-      $('codeEditor').value = file.content; $('codeEditor').disabled = false;
+      $('codeEditor').disabled = false;
       $('activeFileName').textContent = path.split('/').pop();
       $('editorFilePath').textContent = path;
-      $('editorLanguage').textContent = (path.split('.').pop() || 'TEXT').toUpperCase();
+      $('editorLanguage').textContent = languageForPath(path).toUpperCase();
+      setEditorValue(file.content);
+      if (monacoEditor && window.monaco) window.monaco.editor.setModelLanguage(monacoEditor.getModel(), languageForPath(path));
       $('editorStatus').textContent = `${file.content.split('\n').length} строк · ${(new Blob([file.content]).size / 1024).toFixed(1)} KB`;
-      updateEditorDirty(); renderFileTree();
+      updateEditorDirty(); renderFileTree(); renderEditorTabs();
     } catch (error) { toast(error.message); }
   }
 
   function updateEditorDirty() {
     const file = codeCache.get(currentCodePath);
     if (!file) return;
-    file.content = $('codeEditor').value;
+    file.content = currentEditorValue();
     file.dirty = file.content !== file.original;
     $('dirtyMark').hidden = !file.dirty;
     $('saveCodeFile').disabled = !file.dirty;
     $('discardFileChanges').disabled = !file.dirty;
     $('editorStatus').textContent = file.dirty ? 'Есть несохранённые изменения' : `${file.content.split('\n').length} строк · Все изменения сохранены`;
+    renderEditorTabs();
   }
 
   async function saveCurrentCodeFile() {
@@ -442,7 +569,7 @@
 
   function discardCurrentCodeChanges() {
     const file = codeCache.get(currentCodePath); if (!file) return;
-    file.content = file.original; file.dirty = false; $('codeEditor').value = file.original; updateEditorDirty();
+    file.content = file.original; file.dirty = false; setEditorValue(file.original); updateEditorDirty();
   }
 
   async function createWorkspaceFile() {
@@ -459,7 +586,7 @@
   function renderContextFiles() {
     const box = $('contextFiles'); box.innerHTML = '';
     const paths = [...contextPaths];
-    $('contextCount').textContent = `${paths.length} файлов`;
+    $('contextCount').textContent = `${paths.length} файлов`; if ($('contextCountExplorer')) $('contextCountExplorer').textContent = `${paths.length} в контексте`; 
     $('askCodeAI').disabled = !agentConnected || paths.length === 0;
     if (!paths.length) { box.innerHTML = '<span class="context-empty">Открой файл слева, чтобы добавить его в контекст.</span>'; return; }
     for (const path of paths) {
@@ -474,6 +601,7 @@
   async function askCodeAI() {
     const task = $('codeTask').value.trim();
     if (!task) { toast('Опиши, что нужно сделать'); $('codeTask').focus(); return; }
+    if (task.length > 2000) { toast('Сократи задачу до 2000 символов'); return; }
     if (currentCodePath && codeCache.get(currentCodePath)?.dirty) {
       if (!confirm('В активном файле есть несохранённые изменения. Сначала сохранить их и отправить ИИ?')) return;
       await saveCurrentCodeFile();
@@ -489,23 +617,34 @@
         const file = await ensureCodeFileLoaded(path);
         files.push({ path, content: file.content });
       }
-      const response = await fetch('/api/code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task, files, systemPrompt: state.systemPrompt }) });
+      const response = await fetch('/api/code', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ task, files, projectTree: workspaceFiles.slice(0, 300).map(item => item.path), systemPrompt: state.systemPrompt }) });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Не удалось подготовить изменения.');
-      if (!Array.isArray(data.files) || !data.files.length) throw new Error(data.summary || 'ИИ не предложил изменений. Добавь нужные файлы в контекст или уточни задачу.');
+      if (!Array.isArray(data.files)) throw new Error(data.summary || 'ИИ вернул неверный формат ответа.');
       codeProposal = { summary: data.summary, files: data.files.map(item => ({ ...item, expectedHash: codeCache.get(item.path)?.hash, original: codeCache.get(item.path)?.content })) };
       if (codeProposal.files.some(item => !item.expectedHash)) throw new Error('Один из файлов изменился или не был загружен. Обнови контекст и повтори запрос.');
       renderProposal();
-      toast('Предложение готово — проверь изменения перед применением');
+      toast(codeProposal.files.length ? 'Предложение готово — проверь изменения перед применением' : 'Анализ проекта готов');
     } catch (error) { toast(error.message); }
-    finally { $('askCodeAI').disabled = !agentConnected || contextPaths.size === 0; $('askCodeAI').innerHTML = '<span>✦</span> Подготовить изменения <span>↗</span>'; }
+    finally { $('askCodeAI').disabled = !agentConnected || contextPaths.size === 0; $('askCodeAI').innerHTML = '<span>✦</span> Анализировать и подготовить код <span>↗</span>';  }
   }
 
   function renderProposal() {
     if (!codeProposal) { $('codeProposal').hidden = true; return; }
     $('codeProposal').hidden = false;
     $('proposalSummary').textContent = codeProposal.summary;
+    const hasChanges = codeProposal.files.length > 0;
+    $('codeProposal').querySelector('.proposal-heading strong').textContent = hasChanges ? 'План изменений готов' : 'Анализ проекта готов';
+    $('applyProposal').hidden = !hasChanges;
+    const previewWrap = $('codeProposal').querySelector('.proposal-preview-wrap');
+    previewWrap.hidden = !hasChanges;
     const list = $('proposalFiles'); list.innerHTML = '';
+    if (!hasChanges) {
+      const note = document.createElement('div'); note.className = 'analysis-only-note';
+      note.textContent = 'Это аналитический ответ. Файлы проекта не менялись.';
+      list.appendChild(note);
+      return;
+    }
     codeProposal.files.forEach((file, index) => {
       const button = document.createElement('button'); button.type = 'button'; button.className = `proposal-file${index === 0 ? ' active' : ''}`;
       button.textContent = file.path; button.onclick = () => {
@@ -540,7 +679,7 @@
         const cached = codeCache.get(file.path);
         if (cached) { cached.content = file.content; cached.original = file.content; cached.hash = result.files.find(saved => saved.path === file.path)?.hash || cached.hash; cached.dirty = false; }
       }
-      if (currentCodePath && codeCache.has(currentCodePath)) { $('codeEditor').value = codeCache.get(currentCodePath).content; updateEditorDirty(); }
+      if (currentCodePath && codeCache.has(currentCodePath)) { setEditorValue(codeCache.get(currentCodePath).content); updateEditorDirty(); }
       codeProposal = null; $('codeProposal').hidden = true;
       await refreshWorkspace();
       toast(`Готово! Изменено файлов: ${result.files.length}`);
@@ -549,6 +688,60 @@
   }
 
   function rejectCodeProposal() { codeProposal = null; $('codeProposal').hidden = true; toast('Предложение отменено. Файлы не изменены.'); }
+
+
+  function renderImageGallery() {
+    const gallery = $('imageGallery');
+    gallery.innerHTML = '';
+    if (!generatedImages.length) {
+      gallery.innerHTML = '<div class="image-empty"><div class="image-empty-orbit"><span>✧</span></div><strong>Здесь появится твоё изображение</strong><p>Начни с идеи слева. Можно создавать обои, аватары, иллюстрации, концепты и многое другое.</p><div class="image-example-tags"><span>Обои</span><span>Аватар</span><span>Концепт</span><span>Иллюстрация</span></div></div>';
+      $('imageStatus').textContent = 'Пока пусто';
+      return;
+    }
+    $('imageStatus').textContent = `Создано: ${generatedImages.length}`;
+    generatedImages.forEach((item, index) => {
+      const card = document.createElement('article'); card.className = 'generated-image-card';
+      const img = document.createElement('img'); img.src = item.image; img.alt = item.prompt; img.loading = 'lazy';
+      const info = document.createElement('div'); info.className = 'generated-image-info';
+      const prompt = document.createElement('p'); prompt.textContent = item.prompt;
+      const actions = document.createElement('div'); actions.className = 'generated-image-actions';
+      const download = document.createElement('button'); download.type = 'button'; download.textContent = '↓ Скачать'; download.onclick = () => downloadImage(item, index);
+      const copy = document.createElement('button'); copy.type = 'button'; copy.textContent = '▣ Промт'; copy.onclick = () => copyText(item.prompt);
+      actions.append(download, copy); info.append(prompt, actions); card.append(img, info); gallery.prepend(card);
+    });
+  }
+
+  function downloadImage(item, index) {
+    const a = document.createElement('a'); a.href = item.image; a.download = `black-gpt-image-${index + 1}.png`;
+    document.body.appendChild(a); a.click(); a.remove();
+  }
+
+  async function generateImage() {
+    const rawPrompt = $('imagePrompt').value.trim();
+    if (!rawPrompt) { toast('Сначала опиши изображение'); $('imagePrompt').focus(); return; }
+    if (imageBusy) return;
+    imageBusy = true;
+    const button = $('generateImage'); button.disabled = true; button.innerHTML = '<span class="image-spinner"></span> Создаю изображение…';
+    $('imageStatus').textContent = 'Генерация…';
+    $('imageGallery').innerHTML = '<div class="image-generating"><div class="image-generating-orbit"><span>✦</span></div><strong>Black GPT создаёт изображение</strong><p>Модель обрабатывает описание и рисует результат. Не закрывай эту вкладку.</p><div class="image-progress"><i></i></div></div>';
+    const prompt = selectedImageStyle ? `${rawPrompt}
+
+Visual style: ${selectedImageStyle}.` : rawPrompt;
+    try {
+      const response = await fetch('/api/image', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prompt, size: $('imageSize').value, quality: $('imageQuality').value }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || `Ошибка генерации: HTTP ${response.status}`);
+      if (!data.image) throw new Error('Сервер не вернул изображение. Проверь настройки генерации.');
+      generatedImages.push({ image: data.image, prompt: rawPrompt, revisedPrompt: data.revisedPrompt || '', created: Date.now() });
+      renderImageGallery();
+      toast('Изображение готово!');
+    } catch (error) {
+      $('imageGallery').innerHTML = `<div class="image-error"><span>!</span><strong>Не удалось создать изображение</strong><p>${escapeHTML(error.message)}</p><small>Проверь OPENAI_API_KEY в Cloudflare и повтори попытку.</small></div>`;
+      $('imageStatus').textContent = 'Ошибка';
+    } finally {
+      imageBusy = false; button.disabled = false; button.innerHTML = '<span>✦</span> Создать изображение <b>↗</b>';
+    }
+  }
 
   function voiceStart(){const SR=window.SpeechRecognition||window.webkitSpeechRecognition;if(!SR){toast('Голосовой ввод не поддерживается этим браузером');return;}if(recognition){recognition.stop();recognition=null;return;}recognition=new SR();recognition.lang='ru-RU';recognition.interimResults=true;recognition.onresult=e=>{let value='';for(let i=e.resultIndex;i<e.results.length;i++)value+=e.results[i][0].transcript;els.input.value=value;resizeInput();};recognition.onerror=()=>toast('Не удалось распознать речь');recognition.onend=()=>{recognition=null;$('voiceInput').classList.remove('recording');};$('voiceInput').classList.add('recording');recognition.start();}
 
@@ -559,30 +752,39 @@
   $('resetPrompt').onclick=()=>{state.systemPrompt=DEFAULT_PROMPT;els.prompt.value=DEFAULT_PROMPT;persist();$('promptSaveState').textContent='Стандартный промт Black GPT восстановлен';};
   els.temperature.oninput=()=>{state.temperature=Number(els.temperature.value);els.temperatureValue.value=state.temperature.toFixed(1);persist();};
   $('saveHistory').onchange=e=>{state.saveHistory=e.target.checked;if(!state.saveHistory){localStorage.removeItem(HISTORY_KEY);persist();toast('История больше не будет сохраняться; настройки ИИ сохранены');}else persist();};
-  $('darkMode').onchange=e=>{state.dark=e.target.checked;persist();render();};
+  $('darkMode').onchange=e=>{state.dark=e.target.checked;persist();render();if(monacoEditor)window.monaco.editor.setTheme(state.dark?'blackgpt-dark':'blackgpt-light');};
   $('clearAllChats').onclick=()=>{if(confirm('Удалить все чаты? Это действие нельзя отменить.')){state.chats=[];state.activeId=null;persist();render();toast('История удалена');}};
-  $('themeToggle').onclick=()=>{state.dark=!state.dark;$('darkMode').checked=state.dark;persist();render();};
+  $('themeToggle').onclick=()=>{state.dark=!state.dark;$('darkMode').checked=state.dark;persist();render();if(monacoEditor)window.monaco.editor.setTheme(state.dark?'blackgpt-dark':'blackgpt-light');};
   els.input.addEventListener('input',resizeInput);els.input.addEventListener('keydown',e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();stopOrSend();}});els.send.onclick=stopOrSend;
   $('attachFile').onclick=()=>els.fileInput.click();els.fileInput.onchange=()=>{addFiles([...els.fileInput.files]);els.fileInput.value='';};$('voiceInput').onclick=voiceStart;
   $('exportChat').onclick=exportChat;$('shareChat').onclick=shareChat;els.search.oninput=renderChatList;
   document.querySelectorAll('.prompt-card').forEach(card=>card.onclick=()=>{els.input.value=card.dataset.prompt;resizeInput();els.input.focus();});
-  document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();newChat();}if(e.key==='Escape'){closeSettings();closeMobileSidebar();}});
+  document.addEventListener('keydown',e=>{if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='k'){e.preventDefault();newChat();}if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='s' && !$('codeView').hidden){e.preventDefault();saveCurrentCodeFile();}if(e.key==='Escape'){closeSettings();closeMobileSidebar();}});
   els.composer.addEventListener('dragover',e=>{e.preventDefault();els.composer.classList.add('dragging');});els.composer.addEventListener('dragleave',()=>els.composer.classList.remove('dragging'));els.composer.addEventListener('drop',e=>{e.preventDefault();els.composer.classList.remove('dragging');addFiles([...e.dataTransfer.files]);});
   $('showChatView').onclick = () => switchView('chat');
   $('showCodeView').onclick = () => switchView('code');
+  $('showImageView').onclick = () => switchView('images');
   $('connectAgent').onclick = connectAgent;
   $('chooseWorkspace').onclick = chooseWorkspace;
   $('refreshTree').onclick = refreshWorkspace;
   $('newCodeFile').onclick = createWorkspaceFile;
   $('saveCodeFile').onclick = saveCurrentCodeFile;
   $('discardFileChanges').onclick = discardCurrentCodeChanges;
-  $('codeEditor').addEventListener('input', updateEditorDirty);
   $('askCodeAI').onclick = askCodeAI;
   $('applyProposal').onclick = applyCodeProposal;
   $('rejectProposal').onclick = rejectCodeProposal;
   $('agentToken').addEventListener('keydown', e => { if (e.key === 'Enter') connectAgent(); });
   $('codeTask').addEventListener('keydown', e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) askCodeAI(); });
+  $('codeTask').addEventListener('input', () => { $('codeTaskCount').textContent = `${$('codeTask').value.length} / 2000`; $('askCodeAI').disabled = !agentConnected || contextPaths.size === 0 || !$('codeTask').value.trim(); });
+  $('fileSearch').addEventListener('input', renderFileTree);
+  document.querySelectorAll('[data-code-task]').forEach(button => button.addEventListener('click', () => { $('codeTask').value = button.dataset.codeTask; $('codeTaskCount').textContent = `${$('codeTask').value.length} / 2000`; $('askCodeAI').disabled = !agentConnected || contextPaths.size === 0; $('codeTask').focus(); }));
+  $('codeEditor').addEventListener('input', updateEditorDirty);
+  document.querySelectorAll('.image-style').forEach(button => button.addEventListener('click', () => { document.querySelectorAll('.image-style').forEach(item => item.classList.remove('active')); button.classList.add('active'); selectedImageStyle = button.dataset.style || ''; }));
+  $('imagePrompt').addEventListener('input', () => { $('imagePromptCount').textContent = `${$('imagePrompt').value.length} / 5000`; });
+  $('generateImage').onclick = generateImage;
+  $('imagePrompt').addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') generateImage(); });
 
+  initMonaco();
   persist(); // Migrate old Denny AI settings and keep prompt storage independent from chat history.
   render();
 })();
